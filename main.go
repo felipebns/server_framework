@@ -1,20 +1,24 @@
 package main
 
 import (
-	"syscall"
+	"fmt"
+	"unsafe"
+
+	"server_framework/kernel"
 )
 
 func main() {
-	mensagem := []byte("oi, isso saiu direto via syscall.Write\n")
+	mensagem := []byte("oi, isso saiu via MEU proprio syscall\n")
 
-	// syscall.Write(fd, buffer) -> (n int, err error)
-	// fd = 1 é o stdout, por convenção do POSIX (0=stdin, 1=stdout, 2=stderr)
-	// isso NÃO passa por fmt.Println nem por buffer do runtime -- é a
-	// chamada de sistema "write" sendo disparada diretamente
-	n, err := syscall.Write(1, mensagem)
-	if err != nil {
-		panic(err)
-	}
+	// write(fd=1, buffer, tamanho)
+	// Precisamos de unsafe.Pointer pra passar o endereço real do buffer Go
+	// pro assembly -- isso é o "preço" de sair da proteção normal do Go.
+	ret := kernel.RawSyscall3(
+		kernel.SYS_WRITE,
+		1, // fd = stdout
+		uintptr(unsafe.Pointer(&mensagem[0])),
+		uintptr(len(mensagem)),
+	)
 
-	println("bytes escritos:", n)
+	fmt.Println("retorno cru da syscall:", ret)
 }
