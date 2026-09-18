@@ -1,5 +1,11 @@
 package kernel
 
+import "encoding/binary"
+import "strings"
+import "strconv"
+import "unsafe"
+import "fmt"
+
 // Declarando assinaturas de funções externas (assembly) que implementam syscalls.
 // Registador RAX vai receber o identifier
 // Retorno é um file descriptor (int)
@@ -17,21 +23,123 @@ const (
 	SYS_READ = 0
 )
 
-func write()
+// Struct para definir IP e porta
+type sock_addr_in struct {
+	// sin_family é litle endian (campo interno, fora da convenção)
+	// port e addr são big endians (convenção de quando criaram protocolo de rede)
+	sin_family [2]byte // família/domínio de endereço - AF_NET
+	sin_port [2]byte // porta do servidor
+	sin_addr [4]byte // endereço IP do servidor
+	sin_zero [8]byte // padding (cheio de zeros)
+}
 
 //precisa retornar uintpr pq o file descriptor pode ser um ponteiro, desse modo consegue armazenar tanto inteiro quanto ponteiros
 func Socket(domain int, typ int, protocol int) uintptr { 
 	//num -> SYS_SOCKET (código de socket)
-	//rdi -> domain (padrão x86-64)
-	//rsi -> typ (padrão x86-64)
-	//rdx -> protocol (padrão x86-64)
-	return syscall(SYS_SOCKET, uintptr(domain), uintptr(typ), uintptr(protocol), 0, 0, 0) 
+	//rdi -> domain (padrão x86-64) (família de endereço, avisa para o kernel o tipo de dado que vai entrar)
+	//rsi -> typ (padrão x86-64) (tipo conexão)
+	//rdx -> protocol (padrão x86-64) (protocolo da conexão)
+	r := syscall(SYS_SOCKET, uintptr(domain), uintptr(typ), uintptr(protocol), 0, 0, 0) 
+
+	// próprio kernel vai rejeitar se os parametros vierem errado
+	erro := int64(r)
+	if erro < 0 {
+		if erro == -13 {
+			fmt.Println("Erro: permissão negada (EACCES) — provavelmente tentando usar porta menor que 1024 sem privilégio de root")
+		} else if erro == -98 {
+			fmt.Println("Erro: endereço já em uso (EADDRINUSE) — outro processo já está associado a esse IP/porta")
+		} else if erro == -99 {
+			fmt.Println("Erro: endereço indisponível (EADDRNOTAVAIL) — esse IP não pertence a nenhuma interface local")
+		} else if erro == -9 {
+			fmt.Println("Erro: file descriptor inválido (EBADF) — o fd passado não corresponde a um socket aberto")
+		} else if erro == -97 {
+			fmt.Println("Erro: família de endereço não suportada (EAFNOSUPPORT) — domain passado incorretamente")
+		} else {
+			fmt.Printf("Erro desconhecido, código: %d\n", erro)
+		}
+	}
+
+	return r
 }
 
-func bind()
+// porta e endereço já chegam decididos
+func Bind(fd uintptr, porta int, endereco string) int {
+	// fd é file descriptor do socket
+	// sock_addr_in é um struct em que definiremos o endereço do servidor
+	// len_addr é o tamanho desse struct (sempre 16 bytes)
+	if porta < 0 || porta > 65535 {
+		fmt.Println("Porta inválida. Deve estar entre 0 e 65535.")
+		return -1
+	}
 
-func listen()
+	uint_porta := uint16(porta)
+	buffer_porta := [2]byte{0,0}
+	binary.BigEndian.PutUint16(buffer_porta[:], uint_porta) //espera um slice
 
-func accpet()
+	r := strings.Split(endereco, ".")
+	if len(r) != 4 {
+		fmt.Println("Endereço inválido, precisa ter 4 seções")
+		return -1
+	}
 
-func read()
+	var ip_completo []byte
+	for _, section_ip := range r {
+		if len(section_ip) > 3 {
+			fmt.Println("Endereço inválido")
+			return -1
+		}
+		valor, err := strconv.Atoi(section_ip) // converte string para int
+		if valor < 0 || valor > 255 {
+			fmt.Println("Cada seção do IP deve estar entre 0 e 255")
+			return -1
+		}
+
+		if err != nil {
+			fmt.Println("Endereço contém caractere inválido")
+			return -1
+		}
+
+		byte_ip := byte(valor)
+		ip_completo = append(ip_completo, byte_ip)
+	}
+
+	sock_completo := sock_addr_in{
+		sin_family: [2]byte{2,0}, //litle endian (sempre AF_INET = 2)
+		sin_port: buffer_porta, // big
+		sin_addr: [4]byte{ip_completo[0], ip_completo[1], ip_completo[2], ip_completo[3]}, // big por natureza
+		sin_zero: [8]byte{0,0,0,0,0,0,0,0},
+	}
+	
+	// unsafe pointer pq é necessário converter a struct em uintptr (formato que o assembly recebe, também é o formato do ponteiro)
+	// 16 pq é o tamanho do sock_completo em bytes
+	r_sys := syscall(SYS_BIND, fd, uintptr(unsafe.Pointer(&sock_completo)), 16, 0, 0, 0) 
+	erro := int64(r_sys)
+	if erro < 0 {
+		if erro == -13 {
+			fmt.Println("Erro: permissão negada (EACCES) — provavelmente tentando usar porta menor que 1024 sem privilégio de root")
+		} else if erro == -98 {
+			fmt.Println("Erro: endereço já em uso (EADDRINUSE) — outro processo já está associado a esse IP/porta")
+		} else if erro == -99 {
+			fmt.Println("Erro: endereço indisponível (EADDRNOTAVAIL) — esse IP não pertence a nenhuma interface local")
+		} else if erro == -9 {
+			fmt.Println("Erro: file descriptor inválido (EBADF) — o fd passado não corresponde a um socket aberto")
+		} else if erro == -97 {
+			fmt.Println("Erro: família de endereço não suportada (EAFNOSUPPORT) — domain passado incorretamente")
+		} else {
+			fmt.Printf("Erro desconhecido, código: %d\n", erro)
+		}
+		return -1
+	}
+
+	return 0
+}
+
+func Listen()
+
+func Accpet()
+
+func Read()
+
+func Write()
+
+func Close()
