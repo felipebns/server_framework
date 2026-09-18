@@ -6,6 +6,6 @@ import (
 )
 
 func main() {
-	teste := kernel.Socket(0, 0, 0)
-	fmt.Println(teste)
+	file_descriptor := kernel.Socket(0, 0, 0)
+	fmt.Println(file_descriptor)
 }
