@@ -2,11 +2,10 @@ package main
 
 import (
 	"fmt"
-	// "unsafe"
-
-	// "server_framework/kernel"
+	"server_framework/kernel"
 )
 
 func main() {
-	fmt.Println("oi")
+	teste := kernel.Socket(0, 0, 0)
+	fmt.Println(teste)
 }
